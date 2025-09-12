@@ -1,7 +1,255 @@
 <!DOCTYPE html>
 <html lang="en">
-<body>
-    <canvas id="gameCanvas" width="window.innerWidth" height="window.innerHeight"></canvas>
-    <script src="display.js"></script>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ML-Game of Life</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        border: "hsl(var(--border))",
+                        input: "hsl(var(--input))",
+                        ring: "hsl(var(--ring))",
+                        background: "hsl(var(--background))",
+                        foreground: "hsl(var(--foreground))",
+                        primary: {
+                            DEFAULT: "hsl(var(--primary))",
+                            foreground: "hsl(var(--primary-foreground))",
+                        },
+                        secondary: {
+                            DEFAULT: "hsl(var(--secondary))",
+                            foreground: "hsl(var(--secondary-foreground))",
+                        },
+                        destructive: {
+                            DEFAULT: "hsl(var(--destructive))",
+                            foreground: "hsl(var(--destructive-foreground))",
+                        },
+                        muted: {
+                            DEFAULT: "hsl(var(--muted))",
+                            foreground: "hsl(var(--muted-foreground))",
+                        },
+                        accent: {
+                            DEFAULT: "hsl(var(--accent))",
+                            foreground: "hsl(var(--accent-foreground))",
+                        },
+                        popover: {
+                            DEFAULT: "hsl(var(--popover))",
+                            foreground: "hsl(var(--popover-foreground))",
+                        },
+                        card: {
+                            DEFAULT: "hsl(var(--card))",
+                            foreground: "hsl(var(--card-foreground))",
+                        },
+                    },
+                    borderRadius: {
+                        lg: "var(--radius)",
+                        md: "calc(var(--radius) - 2px)",
+                        sm: "calc(var(--radius) - 4px)",
+                    },
+                }
+            },
+        }
+    </script>
+    <style>
+        :root {
+            --background: 0 0% 0%;
+            --foreground: 0 0% 100%;
+            --card: 0 0% 0%;
+            --card-foreground: 0 0% 100%;
+            --popover: 0 0% 0%;
+            --popover-foreground: 0 0% 100%;
+            --primary: 0 0% 100%;
+            --primary-foreground: 0 0% 0%;
+            --secondary: 0 0% 100%;
+            --secondary-foreground: 0 0% 0%;
+            --muted: 0 0% 50%;
+            --muted-foreground: 0 0% 70%;
+            --accent: 0 0% 100%;
+            --accent-foreground: 0 0% 0%;
+            --destructive: 0 100% 50%;
+            --destructive-foreground: 0 0% 100%;
+            --border: 0 0% 100%;
+            --input: 0 0% 0%;
+            --ring: 0 0% 100%;
+            --radius: 0.5rem;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            background: black;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
+            color: white;
+        }
+        
+        canvas {
+            background: black;
+            cursor: crosshair;
+        }
+        
+        body.pattern-mode canvas {
+            cursor: none;
+        }
+        
+        .pattern-dropdown {
+            position: fixed;
+            background: black;
+            border: 1px solid white;
+            border-radius: 4px;
+            padding: 8px;
+            z-index: 1000;
+            display: none;
+            max-height: 300px;
+            overflow-y: auto;
+            min-width: 200px;
+        }
+        
+        .pattern-option {
+            padding: 8px;
+            cursor: pointer;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .pattern-option:hover {
+            background: #333;
+        }
+        
+        .pattern-option:last-child {
+            border-bottom: none;
+        }
+        
+        .pattern-preview {
+            width: 60px;
+            height: 40px;
+            background: black;
+            border: 1px solid #333;
+            margin-left: 10px;
+        }
+        
+        /* UI Toggle Animations */
+        .ui-panel {
+            transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+        }
+        
+        .ui-panel.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(-10px);
+        }
+        
+        #speed-control.hidden {
+            transform: translateY(-10px);
+        }
+        
+        #instructions-panel.hidden {
+            transform: translateY(10px);
+        }
+        
+        /* Stats Panel Styling */
+        #stats-panel {
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="dark">
+    <!-- stats panel -->
+    <div id="stats-panel" class="absolute top-4 left-4 z-10 p-4 min-w-[280px]">
+        <div class="grid grid-cols-2 gap-4">
+            <div class="text-center">
+                <div class="text-xl font-mono text-white" id="generation-display">0</div>
+                <div class="text-xs text-white">Generation</div>
+            </div>
+            <div class="text-center">
+                <div class="text-xl font-mono text-white" id="timestep-display">0</div>
+                <div class="text-xs text-white">Timestep</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- control panel -->
+    <div id="control-panel" class="ui-panel absolute top-20 left-4 z-10 p-4 min-w-[280px]">
+        <div class="space-y-4">
+            <div class="space-y-2">
+                <div class="flex gap-2">
+                    <button id="play-pause-btn" class="flex-1 px-3 py-2 bg-white text-black rounded-md hover:bg-gray-200 transition-colors text-sm font-medium">
+                        ▶ Play
+                    </button>
+                    <button id="clear-btn" class="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm">
+                        Clear
+                    </button>
+                </div>
+                <button id="random-btn" class="w-full px-3 py-2 bg-white text-black rounded-md hover:bg-gray-200 transition-colors text-sm">
+                    Random Fill
+                </button>
+            </div>
+            
+            <!-- hidden pattern selector ( shown on shift+click) -->
+            <select id="pattern-select" class="hidden">
+                <option value="">None (Draw Mode)</option>
+                <option value="glider">Glider</option>
+                <option value="lwss">LWSS (Lightweight Spaceship)</option>
+                <option value="gosperGun">Gosper Gun</option>
+                <option value="pulsar">Pulsar</option>
+                <option value="pentadecathlon">Pentadecathlon</option>
+                <option value="rpentomino">R-pentomino</option>
+                <option value="acorn">Acorn</option>
+                <option value="diehard">Diehard</option>
+                <option value="beacon">Beacon</option>
+                <option value="toad">Toad</option>
+            </select>
+            
+            <!-- Selected Pattern Info -->
+            <div id="pattern-info" class="hidden p-3 border border-white rounded-md">
+                <div class="text-sm font-medium text-white" id="pattern-name"></div>
+                <div class="text-xs text-white mt-1" id="pattern-description"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- instructions panel -->
+    <div id="instructions-panel" class="ui-panel absolute bottom-4 left-4 z-10 p-4 max-w-[280px]">
+        <div class="text-xs text-white space-y-1">
+            <div><kbd class="px-1 py-0.5 bg-white text-black rounded">Space</kbd> Play/Pause</div>
+            <div><kbd class="px-1 py-0.5 bg-white text-black rounded">R</kbd> Random Fill</div>
+            <div><kbd class="px-1 py-0.5 bg-white text-black rounded">Ctrl+C</kbd> Clear Grid</div>
+            <div><kbd class="px-1 py-0.5 bg-white text-black rounded">Esc</kbd> Cancel Pattern</div>
+            <div><kbd class="px-1 py-0.5 bg-white text-black rounded">I</kbd> Toggle UI</div>
+            <div><kbd class="px-1 py-0.5 bg-white text-black rounded">Shift+Click</kbd> Pattern Menu</div>
+            <div>Click and drag to draw cells</div>
+        </div>
+    </div>
+    
+    <!-- speed control -->
+    <div id="speed-control" class="ui-panel absolute top-4 right-4 z-10 p-4">
+        <div class="space-y-2">
+            <label class="text-sm font-medium text-white">Speed</label>
+            <input type="range" id="speed-slider" min="50" max="1000" value="200" step="50" 
+                   class="w-32 h-2 bg-white rounded-lg appearance-none cursor-pointer accent-red-600">
+            <div class="text-xs text-white text-center" id="speed-display">200ms</div>
+        </div>
+    </div>
+    
+    
+    <!-- pattern dropdown -->
+    <div id="pattern-dropdown" class="pattern-dropdown">
+        <!-- populated by javascript -->
+    </div>
+    
+    <!-- canvas -->
+    <div class="relative w-full h-screen">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    
+    <script type="module" src="display.js"></script>
 </body>
 </html>
