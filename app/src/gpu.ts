@@ -19,6 +19,7 @@ export class GPU {
     private nextStateBuffer!: GPUBuffer;
     private readBuffer!: GPUBuffer;
     private singleCellReadBuffer!: GPUBuffer;
+    private gridReadBuffer!: GPUBuffer;
 
     private width: number;
     private height: number;
@@ -89,6 +90,12 @@ export class GPU {
             usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
         })
 
+        // grid read buffer for full grid access
+        this.gridReadBuffer = this.device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        })
+
         //grid dimensions
         this.uniformBuffer = this.device.createBuffer({
             size: 16, 
@@ -141,12 +148,12 @@ export class GPU {
 
     //get current grid state (async)
     async getGridData(): Promise<Uint32Array> {
-        //copy current state to read buffer
+        //copy current state to grid read buffer
         const commandEncoder = this.device.createCommandEncoder();
         commandEncoder.copyBufferToBuffer(
             this.currentStateBuffer,
             0,
-            this.readBuffer,
+            this.gridReadBuffer,
             0,
             this.width * this.height * 4,
         );
@@ -154,10 +161,10 @@ export class GPU {
         this.device.queue.submit([commandEncoder.finish()]);
         //map and read buffer
 
-        await this.readBuffer.mapAsync(GPUMapMode.READ);
-        const arrayBuffer = this.readBuffer.getMappedRange();
+        await this.gridReadBuffer.mapAsync(GPUMapMode.READ);
+        const arrayBuffer = this.gridReadBuffer.getMappedRange();
         const data = new Uint32Array(arrayBuffer.slice(0));
-        this.readBuffer.unmap();
+        this.gridReadBuffer.unmap();
 
         return data;
     }
@@ -173,7 +180,14 @@ export class GPU {
         encoder.copyBufferToBuffer(this.currentStateBuffer, offset, this.singleCellReadBuffer, 0, 4);
         this.device.queue.submit([encoder.finish()]);
 
-        await this.singleCellReadBuffer.mapAsync(GPUMapMode.READ);
+        //unmap if already mapped
+        if(this.singleCellReadBuffer.mapState === 'mapped'){
+            this.singleCellReadBuffer.unmap();
+        } else {
+            await this.singleCellReadBuffer.mapAsync(GPUMapMode.READ);
+        }
+
+        //read value
         const view = new Uint32Array(this.singleCellReadBuffer.getMappedRange());
         const value = view[0];
         this.singleCellReadBuffer.unmap();

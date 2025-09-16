@@ -55,9 +55,11 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         try {
             // fetch grid data from gpu
+            console.log('Fetching grid data from GPU');
             const gridData = await game.getGridData();
 
             //render cells
+            console.log('Rendering cells');
             ctx.fillStyle = 'white';
             for (let row = 0; row < gridHeight; row++){
                 for (let col = 0; col < gridWidth; col++){
@@ -69,6 +71,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             }
 
             // draw pattern preview (if any)
+            console.log('Drawing pattern preview');
             if (selectedPattern && mousePos){
                 const cells = getPatternCells(selectedPattern);
                 if (cells){
@@ -93,6 +96,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             }
 
             //draw grid lines
+            console.log('Drawing grid lines');
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
             ctx.lineWidth = 0.5;
 
@@ -109,6 +113,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 ctx.lineTo(gridWidth * cellSize, row * cellSize);
                 ctx.stroke();
             }
+            
         } catch (error){
             console.error('Error rendering canvas:', error);
         }
