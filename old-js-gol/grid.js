@@ -151,7 +151,7 @@ export class Grid {
     computeNextGeneration() {
         const nextGrid = Array(this.gridHeight).fill().map(() => Array(this.gridWidth).fill(0));
         
-        // process cell
+        // process each cell
         for (let row = 0; row < this.gridHeight; row++) {
             for (let col = 0; col < this.gridWidth; col++) {
                 const cell = new Cell(row, col, this.grid[row][col]);
