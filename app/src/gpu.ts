@@ -17,9 +17,11 @@ export class GPU {
     private uniformBuffer!: GPUBuffer;
     private currentStateBuffer!: GPUBuffer;
     private nextStateBuffer!: GPUBuffer;
-    private readBuffer!: GPUBuffer;
     private singleCellReadBuffer!: GPUBuffer;
     private gridReadBuffer!: GPUBuffer;
+
+    // readback coordination
+    private gridReadInFlight: Promise<Uint32Array> | null = null;
 
     private width: number;
     private height: number;
@@ -61,28 +63,23 @@ export class GPU {
         //buffers
         this.createBuffers();
         this.createBindGroup();
+        console.log('GPU sim initialized', { width: this.width, height: this.height });
     }
 
     private createBuffers(): void {
         const bufferSize = this.width * this.height * 4; // 4 bytes per u32
 
-        //current state buffer
+        //current state buffer -- read and write
         this.currentStateBuffer = this.device.createBuffer({
             size: bufferSize, 
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            usage: GPUBufferUsage.STORAGE |  GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
         });
 
-        //next state buffer
+        //next state buffer - mirrors current state buffer
         this.nextStateBuffer = this.device.createBuffer({
             size: bufferSize, 
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
         });
-
-        //read buffer for cpu access
-        this.readBuffer = this.device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        })
 
         // single cell read buffer (4 bytes) for targeted reads
         this.singleCellReadBuffer = this.device.createBuffer({
@@ -144,29 +141,47 @@ export class GPU {
         }
 
         this.device.queue.writeBuffer(this.currentStateBuffer, 0, data);
+        // keep it light, but confirm write
+        // console.debug('Grid data written');
     }
 
     //get current grid state (async)
     async getGridData(): Promise<Uint32Array> {
+
+        //check if read is in flight
+        if(this.gridReadInFlight) return this.gridReadInFlight;
+
         //copy current state to grid read buffer
-        const commandEncoder = this.device.createCommandEncoder();
-        commandEncoder.copyBufferToBuffer(
-            this.currentStateBuffer,
-            0,
-            this.gridReadBuffer,
-            0,
-            this.width * this.height * 4,
-        );
+        const run = async () =>{
+            const commandEncoder = this.device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(
+                this.currentStateBuffer,
+                0,
+                this.gridReadBuffer,
+                0,
+                this.width * this.height * 4,
+            );
 
-        this.device.queue.submit([commandEncoder.finish()]);
-        //map and read buffer
+            this.device.queue.submit([commandEncoder.finish()]);
 
-        await this.gridReadBuffer.mapAsync(GPUMapMode.READ);
-        const arrayBuffer = this.gridReadBuffer.getMappedRange();
-        const data = new Uint32Array(arrayBuffer.slice(0));
-        this.gridReadBuffer.unmap();
+            //map and read buffer
+            if (this.gridReadBuffer.mapState === 'mapped'){
+                this.gridReadBuffer.unmap();
+            }
 
-        return data;
+            await this.gridReadBuffer.mapAsync(GPUMapMode.READ);
+            const data = new Uint32Array(this.gridReadBuffer.getMappedRange().slice(0));
+            this.gridReadBuffer.unmap();
+
+            return data;
+        };
+
+        this.gridReadInFlight = run().finally(()=> {
+            this.gridReadInFlight = null;
+        });
+
+        return this.gridReadInFlight;
+
     }
 
     private cellOffset(col: number, row: number): number {
@@ -174,7 +189,9 @@ export class GPU {
     }
 
     async getCell(col: number, row: number): Promise<number> {
+        //if cell is out of bounds, return 0
         if (col < 0 || col >= this.width || row < 0 || row >= this.height) return 0;
+
         const offset = this.cellOffset(col, row);
         const encoder = this.device.createCommandEncoder();
         encoder.copyBufferToBuffer(this.currentStateBuffer, offset, this.singleCellReadBuffer, 0, 4);
@@ -183,9 +200,8 @@ export class GPU {
         //unmap if already mapped
         if(this.singleCellReadBuffer.mapState === 'mapped'){
             this.singleCellReadBuffer.unmap();
-        } else {
-            await this.singleCellReadBuffer.mapAsync(GPUMapMode.READ);
         }
+        await this.singleCellReadBuffer.mapAsync(GPUMapMode.READ);
 
         //read value
         const view = new Uint32Array(this.singleCellReadBuffer.getMappedRange());
@@ -205,12 +221,14 @@ export class GPU {
         const current = await this.getCell(col, row);
         const next = current === 1 ? 0 : 1;
         this.setCell(col, row, next as 0 | 1);
+        console.log('Cell toggled', { col, row, next });
         this.notifyUpdate();
     }
 
     placePattern(cells: number[][], startCol: number, startRow: number): boolean {
         if (!cells || cells.length === 0) return false;
         let placed = false;
+        let placedCount = 0;
         for (let r = 0; r < cells.length; r++){
             const rowArr = cells[r];
             for (let c = 0; c < rowArr.length; c++){
@@ -220,11 +238,15 @@ export class GPU {
                     if (col >= 0 && col < this.width && row >= 0 && row < this.height){
                         this.setCell(col, row, 1);
                         placed = true;
+                        placedCount++;
                     }
                 }
             }
         }
-        if (placed) this.notifyUpdate();
+        if (placed) {
+            console.log('Pattern placed', { startCol, startRow, placedCount });
+            this.notifyUpdate();
+        }
         return placed;
     }
 
@@ -254,6 +276,8 @@ export class GPU {
 
         //increment generation
         this.generation++;
+        // mild tick log at low volume
+        // console.debug('Generation advanced', this.generation);
         this.notifyUpdate();
     }
 
@@ -264,6 +288,7 @@ export class GPU {
         this.isRunning = true;
         this.lastUpdateTime = performance.now();
         this.animate();
+        console.log('Sim started');
         this.notifyUpdate();
     }
 
@@ -275,6 +300,7 @@ export class GPU {
             this.animationId = null;
         }
 
+        console.log('Sim stopped');
         this.notifyUpdate();
     }
 
@@ -300,6 +326,7 @@ export class GPU {
     // Clear grid
     const emptyData = new Uint32Array(this.width * this.height);
     this.setGridData(emptyData);
+    console.log('Grid cleared');
     this.notifyUpdate();
   }
 
@@ -311,11 +338,13 @@ export class GPU {
     
     this.generation = 0;
     this.setGridData(data);
+    console.log('Grid randomized', { density });
     this.notifyUpdate();
   }
 
   setSpeed(speed: number): void {
     this.speed = Math.max(50, Math.min(1000, speed));
+    console.log('Speed set', { speed: this.speed });
     this.notifyUpdate();
   }
 
@@ -329,6 +358,7 @@ export class GPU {
     // Recreate buffers and bind group
     this.createBuffers();
     this.createBindGroup();
+    console.log('Grid resized', { width: this.width, height: this.height });
     
     this.notifyUpdate();
   }
@@ -354,7 +384,6 @@ export class GPU {
     
     this.currentStateBuffer?.destroy();
     this.nextStateBuffer?.destroy();
-    this.readBuffer?.destroy();
     this.uniformBuffer?.destroy();
   }
 

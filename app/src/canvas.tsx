@@ -20,31 +20,30 @@ export const Canvas: React.FC<CanvasProps> = ({
     const [isInitialized, setIsInitialized] = useState(false);
     const [uiVisible, setUiVisible] = useState(true);
 
-    // Drawing state
+    // drawing
     const [isDragging, setIsDragging] = useState(false);
     const drawingStateRef = useRef<0 | 1>(1);
     const [mousePos, setMousePos] = useState<{col: number; row: number} | null>(null);
 
-    // Pattern state
+    // pattern 
     const [selectedPattern, setSelectedPattern] = useState<PatternName | null>(null);
     const [dropdownVisible, setDropdownVisible] = useState(false);
     const [dropdownPos, setDropdownPos] = useState<{x: number; y: number}>({ x: 0, y: 0 });
 
-
     const gridWidth = Math.floor(width / cellSize);
     const gridHeight = Math.floor(height / cellSize);
 
-    const handleStatsUpdate = useCallback((newStats: Stats) =>{
-        setStats(newStats)
-        requestAnimationFrame(() => {
-            render(newStats);
-        })
-    }, [])
+    //cached grid and coordination
+    const gridDataRef = useRef<Uint32Array | null>(null);
+    const fetchInFlightRef = useRef<Promise<void> | null>(null);
+    const pendingGenRef = useRef<number | null>(null);
+    const rafIdRef = useRef<number | null>(null); 
+    const initStartedRef = useRef(false);
 
-    const render = async (_currentStats: Stats) => {
+    const drawFromCache = useCallback(() => {
         const canvas = canvasRef.current;
-        const game = gameRef.current;
-        if (!canvas || !game) return;
+        const data = gridDataRef.current;
+        if(!canvas) return;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
@@ -53,73 +52,108 @@ export const Canvas: React.FC<CanvasProps> = ({
         ctx.fillStyle = 'black';
         ctx.fillRect(0, 0, width, height);
 
-        try {
-            // fetch grid data from gpu
-            console.log('Fetching grid data from GPU');
-            const gridData = await game.getGridData();
-
-            //render cells
-            console.log('Rendering cells');
-            ctx.fillStyle = 'white';
-            for (let row = 0; row < gridHeight; row++){
-                for (let col = 0; col < gridWidth; col++){
-                    const index = row * gridWidth + col;
-                    if (gridData[index] === 1){
-                        ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
-                    }
+        //render cells
+        if(data){
+        ctx.fillStyle = 'white';
+        for (let row = 0; row < gridHeight; row++){
+            let base = row * gridWidth;
+            for (let col = 0; col < gridWidth; col++){
+                if (data[base + col] === 1){
+                    ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+                }
                 }
             }
-
-            // draw pattern preview (if any)
-            console.log('Drawing pattern preview');
-            if (selectedPattern && mousePos){
-                const cells = getPatternCells(selectedPattern);
-                if (cells){
-                    ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
-                    ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
-                    ctx.lineWidth = 1;
-                    for (let r = 0; r < cells.length; r++){
-                        for (let c = 0; c < cells[r].length; c++){
-                            if (cells[r][c] === 1){
-                                const drawCol = mousePos.col + c;
-                                const drawRow = mousePos.row + r;
-                                if (drawCol >= 0 && drawCol < gridWidth && drawRow >= 0 && drawRow < gridHeight){
-                                    const x = drawCol * cellSize;
-                                    const y = drawRow * cellSize;
-                                    ctx.fillRect(x, y, cellSize, cellSize);
-                                    ctx.strokeRect(x, y, cellSize, cellSize);
-                                }
+        }
+        
+        if(selectedPattern && mousePos){
+            const cells = getPatternCells(selectedPattern);
+            if (cells){
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+                ctx.lineWidth = 1;
+                for (let r = 0; r < cells.length; r++){
+                    for (let c = 0; c < cells[r].length; c++){
+                        if (cells[r][c] === 1){
+                            const drawCol = mousePos.col + c;
+                            const drawRow = mousePos.row + r;
+                            if (drawCol >= 0 && drawCol < gridWidth && drawRow >= 0 && drawRow < gridHeight){
+                                ctx.fillRect(drawCol * cellSize, drawRow * cellSize, cellSize, cellSize);
+                                ctx.strokeRect(drawCol * cellSize, drawRow * cellSize, cellSize, cellSize);
                             }
                         }
                     }
                 }
             }
-
-            //draw grid lines
-            console.log('Drawing grid lines');
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 0.5;
-
-            for (let col = 0; col <= gridWidth; col++){
-                ctx.beginPath();
-                ctx.moveTo(col * cellSize, 0);
-                ctx.lineTo(col * cellSize, gridHeight * cellSize);
-                ctx.stroke();
-            }
-
-            for (let row = 0; row <= gridHeight; row++){
-                ctx.beginPath();
-                ctx.moveTo(0, row * cellSize);
-                ctx.lineTo(gridWidth * cellSize, row * cellSize);
-                ctx.stroke();
-            }
-            
-        } catch (error){
-            console.error('Error rendering canvas:', error);
         }
-    };
+        //draw grid lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 0.5;
+
+        for (let col = 0; col <= gridWidth; col++){
+            ctx.beginPath();
+            ctx.moveTo(col * cellSize, 0);
+            ctx.lineTo(col * cellSize, gridHeight * cellSize);
+            ctx.stroke();
+        }
+
+        for (let row = 0; row <= gridHeight; row++){
+            ctx.beginPath();
+            ctx.moveTo(0, row * cellSize);
+            ctx.lineTo(gridWidth * cellSize, row * cellSize);
+            ctx.stroke();
+        }
+    }, [width, height, cellSize, gridWidth, gridHeight, selectedPattern, mousePos]);
+
+    const requestDraw = useCallback(() => {
+        if(rafIdRef.current) return;
+        rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null;
+            drawFromCache();
+        });
+    }, [drawFromCache]);
+
+    const scheduleFetch = useCallback((generation: number)=>{
+        pendingGenRef.current = generation;
+        if(fetchInFlightRef.current) return;
+
+        const runOnce = async () => {
+            pendingGenRef.current = null;
+            const game = gameRef.current;
+            if(!game) return;
+            const gridData = await game.getGridData();
+            gridDataRef.current = gridData;
+            // fetched and cached one frame of grid data
+            requestDraw();
+        };
+        const loop = async () => {
+            do {
+                await runOnce();
+            } while (pendingGenRef.current !== null);
+        };
+        fetchInFlightRef.current = loop().finally(()=> {
+            fetchInFlightRef.current = null;
+        });
+    }, [requestDraw]);
+
+    const handleStatsUpdate = useCallback((newStats: Stats) =>{
+        setStats(newStats);
+    }, [])
 
     useEffect(() => {
+        if(stats){
+            scheduleFetch(stats.generation);
+        }
+    }, [stats?.generation, scheduleFetch]);
+
+    useEffect(() => {
+        requestDraw();
+    }, [mousePos, selectedPattern, cellSize, gridWidth, gridHeight, width, height, requestDraw]);
+
+    useEffect(() => {
+
+        if(initStartedRef.current) return;
+        initStartedRef.current = true;
+
         const initializeWebGPU = async () => {
             const webGPUManager = WebGPUManager.getInstance();
 
@@ -157,6 +191,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 if (!res.ok) throw new Error(`Failed to fetch patterns: ${res.status}`);
                 const data = await res.json();
                 setPatterns(data);
+                console.log('Patterns loaded', { count: Object.keys(data || {}).length });
             } catch (err) {
                 console.error('Error loading patterns.json', err);
             }
@@ -192,6 +227,23 @@ export const Canvas: React.FC<CanvasProps> = ({
             const cells = getPatternCells(selectedPattern);
             if (cells){
                 gameRef.current.placePattern(cells, pos.col, pos.row);
+                // update CPU cache immediately for responsiveness
+                const data = gridDataRef.current;
+                if (data){
+                    for (let r = 0; r < cells.length; r++){
+                        for (let c = 0; c < cells[r].length; c++){
+                            if (cells[r][c] === 1){
+                                const col = pos.col + c;
+                                const row = pos.row + r;
+                                if (col >= 0 && col < gridWidth && row >= 0 && row < gridHeight){
+                                    data[row * gridWidth + col] = 1;
+                                }
+                            }
+                        }
+                    }
+                    requestDraw();
+                    console.log('Pattern applied to CPU cache', { pattern: selectedPattern, at: pos });
+                }
             }
             return;
         }
@@ -201,6 +253,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         const desired = (current === 1 ? 0 : 1) as 0 | 1;
         drawingStateRef.current = desired;
         gameRef.current.setCell(pos.col, pos.row, desired);
+        // update CPU cache and redraw
+        const data = gridDataRef.current;
+        if (data){
+            data[pos.row * gridWidth + pos.col] = desired;
+            requestDraw();
+        }
         setIsDragging(true);
     }, [cellSize, selectedPattern]);
 
@@ -210,6 +268,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         setMousePos(pos);
         if (isDragging && !selectedPattern && gameRef.current){
             gameRef.current.setCell(pos.col, pos.row, drawingStateRef.current);
+            const data = gridDataRef.current;
+            if (data){
+                data[pos.row * gridWidth + pos.col] = drawingStateRef.current;
+                requestDraw();
+            }
         }
     }, [isDragging, selectedPattern]);
 

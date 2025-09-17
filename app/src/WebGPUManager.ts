@@ -26,8 +26,10 @@ export class WebGPUManager {
                 console.error('No appropriate adapter found');
                 return false;
             }
+            console.log('WebGPU adapter acquired');
 
             this.device = await this.adapter.requestDevice();
+            console.log('WebGPU device acquired');
             return true;
         } catch (error){
             console.error('Failed to initialize WebGPU:', error);
