@@ -1,6 +1,5 @@
 // messaging.wgsl
 // messaging + neighborhood sensing between cells
-//  - stage 0 (energy-update): decay corpse energy, deposit on death, harvest on birth
 //  - stage 1 (broadcast): emit k-bit payload (default: 0), optional learned/debug
 //  - stage 2 (receive): gather 8 neighbor payloads into packed inbox0; compute energy scent mask
 //  - stage 3 (respond): optional second transmit (default: 0), optional learned/debug; build inbox1
@@ -35,11 +34,8 @@ struct Uniforms {
 @group(0) @binding(8) var<storage, read>        learned_msg_stage1 : array<u32>;
 @group(0) @binding(9) var<storage, read>        learned_msg_stage3 : array<u32>;
 
-// corpse energy and last-alive tracking
-//  - dead_energy: energy residue stored at dead cells; decays by 0.02 per generation
-//  - alive_prev:  previous tick's alive flag to detect birth/death transitions
-@group(0) @binding(10) var<storage, read_write> dead_energy  : array<f32>;
-@group(0) @binding(11) var<storage, read_write> alive_prev   : array<u32>;
+// corpse energy (maintained by energy.wgsl). Used here only for energy scent in stage 2.
+@group(0) @binding(10) var<storage, read>       dead_energy  : array<f32>;
 
 // ----- helpers -----
 
@@ -100,35 +96,7 @@ fn charge_for_payload(i: u32, payload: u32) {
   energy[i] = max(0.0, energy[i] - cost);
 }
 
-// ----- stage 0: corpse energy update (decay, deposit on death, harvest on birth) -----
-
-@compute @workgroup_size(16,16)
-fn msg_stage0_energy_update(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (gid.x >= U.width || gid.y >= U.height) { return; }
-  let i = gid.y * U.width + gid.x;
-
-  // decay corpse energy linearly by 0.02 per generation, clamp to >= 0
-  let decayed = max(0.0, dead_energy[i] - 0.02);
-  dead_energy[i] = decayed;
-
-  let was_alive = alive_prev[i];
-  let is_alive  = alive_in[i];
-
-  // death: deposit remaining energy as corpse energy and clear live energy
-  if (was_alive == 1u && is_alive == 0u) {
-    dead_energy[i] = energy[i];
-    energy[i] = 0.0;
-  }
-
-  // birth/move into cell: harvest corpse energy into live energy
-  if (was_alive == 0u && is_alive == 1u) {
-    energy[i] = energy[i] + dead_energy[i];
-    dead_energy[i] = 0.0;
-  }
-
-  // update previous alive state for next tick
-  alive_prev[i] = is_alive;
-}
+// Note: stage 0 was removed. Corpse energy decay/harvest/deposit is handled in energy.wgsl post-life.
 
 //stage 1: broadcast 
 
