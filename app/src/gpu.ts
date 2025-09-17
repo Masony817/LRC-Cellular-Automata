@@ -184,14 +184,18 @@ export class GPU {
 
     }
 
+    private wrapCoordinate(n: number, max: number): number {
+        const r = n % max;
+        return r < 0 ? r + max : r;
+    }
+
     private cellOffset(col: number, row: number): number {
-        return (row * this.width + col) * 4;
+        const wrappedCol = this.wrapCoordinate(col, this.width);
+        const wrappedRow = this.wrapCoordinate(row, this.height);
+        return (wrappedRow * this.width + wrappedCol) * 4;
     }
 
     async getCell(col: number, row: number): Promise<number> {
-        //if cell is out of bounds, return 0
-        if (col < 0 || col >= this.width || row < 0 || row >= this.height) return 0;
-
         const offset = this.cellOffset(col, row);
         const encoder = this.device.createCommandEncoder();
         encoder.copyBufferToBuffer(this.currentStateBuffer, offset, this.singleCellReadBuffer, 0, 4);
@@ -211,7 +215,6 @@ export class GPU {
     }
 
     setCell(col: number, row: number, state: 0 | 1): void {
-        if (col < 0 || col >= this.width || row < 0 || row >= this.height) return;
         const offset = this.cellOffset(col, row);
         const one = new Uint32Array([state]);
         this.device.queue.writeBuffer(this.currentStateBuffer, offset, one);
@@ -235,11 +238,9 @@ export class GPU {
                 if (rowArr[c] === 1){
                     const col = startCol + c;
                     const row = startRow + r;
-                    if (col >= 0 && col < this.width && row >= 0 && row < this.height){
-                        this.setCell(col, row, 1);
-                        placed = true;
-                        placedCount++;
-                    }
+                    this.setCell(col, row, 1);
+                    placed = true;
+                    placedCount++;
                 }
             }
         }

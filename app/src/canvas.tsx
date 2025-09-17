@@ -40,6 +40,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     const rafIdRef = useRef<number | null>(null); 
     const initStartedRef = useRef(false);
 
+    const wrap = useCallback((n: number, max: number) => {
+        const r = n % max;
+        return r < 0 ? r + max : r;
+    }, []);
+
     const drawFromCache = useCallback(() => {
         const canvas = canvasRef.current;
         const data = gridDataRef.current;
@@ -74,12 +79,10 @@ export const Canvas: React.FC<CanvasProps> = ({
                 for (let r = 0; r < cells.length; r++){
                     for (let c = 0; c < cells[r].length; c++){
                         if (cells[r][c] === 1){
-                            const drawCol = mousePos.col + c;
-                            const drawRow = mousePos.row + r;
-                            if (drawCol >= 0 && drawCol < gridWidth && drawRow >= 0 && drawRow < gridHeight){
-                                ctx.fillRect(drawCol * cellSize, drawRow * cellSize, cellSize, cellSize);
-                                ctx.strokeRect(drawCol * cellSize, drawRow * cellSize, cellSize, cellSize);
-                            }
+                            const drawCol = wrap(mousePos.col + c, gridWidth);
+                            const drawRow = wrap(mousePos.row + r, gridHeight);
+                            ctx.fillRect(drawCol * cellSize, drawRow * cellSize, cellSize, cellSize);
+                            ctx.strokeRect(drawCol * cellSize, drawRow * cellSize, cellSize, cellSize);
                         }
                     }
                 }
@@ -102,7 +105,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             ctx.lineTo(gridWidth * cellSize, row * cellSize);
             ctx.stroke();
         }
-    }, [width, height, cellSize, gridWidth, gridHeight, selectedPattern, mousePos]);
+    }, [width, height, cellSize, gridWidth, gridHeight, selectedPattern, mousePos, wrap]);
 
     const requestDraw = useCallback(() => {
         if(rafIdRef.current) return;
@@ -233,11 +236,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                     for (let r = 0; r < cells.length; r++){
                         for (let c = 0; c < cells[r].length; c++){
                             if (cells[r][c] === 1){
-                                const col = pos.col + c;
-                                const row = pos.row + r;
-                                if (col >= 0 && col < gridWidth && row >= 0 && row < gridHeight){
-                                    data[row * gridWidth + col] = 1;
-                                }
+                                const col = wrap(pos.col + c, gridWidth);
+                                const row = wrap(pos.row + r, gridHeight);
+                                data[row * gridWidth + col] = 1;
                             }
                         }
                     }
@@ -253,14 +254,16 @@ export const Canvas: React.FC<CanvasProps> = ({
         const desired = (current === 1 ? 0 : 1) as 0 | 1;
         drawingStateRef.current = desired;
         gameRef.current.setCell(pos.col, pos.row, desired);
-        // update CPU cache and redraw
+        // update CPU cache and redraw (wrapping)
         const data = gridDataRef.current;
         if (data){
-            data[pos.row * gridWidth + pos.col] = desired;
+            const col = wrap(pos.col, gridWidth);
+            const row = wrap(pos.row, gridHeight);
+            data[row * gridWidth + col] = desired;
             requestDraw();
         }
         setIsDragging(true);
-    }, [cellSize, selectedPattern]);
+    }, [cellSize, selectedPattern, wrap]);
 
     const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
         const pos = localCoordsToCell(event);
@@ -270,11 +273,13 @@ export const Canvas: React.FC<CanvasProps> = ({
             gameRef.current.setCell(pos.col, pos.row, drawingStateRef.current);
             const data = gridDataRef.current;
             if (data){
-                data[pos.row * gridWidth + pos.col] = drawingStateRef.current;
+                const col = wrap(pos.col, gridWidth);
+                const row = wrap(pos.row, gridHeight);
+                data[row * gridWidth + col] = drawingStateRef.current;
                 requestDraw();
             }
         }
-    }, [isDragging, selectedPattern]);
+    }, [isDragging, selectedPattern, wrap]);
 
     const handleMouseUp = useCallback(() => {
         setIsDragging(false);

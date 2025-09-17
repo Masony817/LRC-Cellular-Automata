@@ -19,12 +19,21 @@ fn get_index(col: u32, row: u32) -> u32 {
     return row * uniforms.width + col;
 }
 
-// get cell state with bounds checking (dead if out-of-bounds)
+// get cell state with toroidal wrapping
 fn get_cell(col: i32, row: i32) -> u32 {
-    if (col < 0 || col >= i32(uniforms.width) || row < 0 || row >= i32(uniforms.height)) {
-        return 0u;
-    }
-    return current_state[get_index(u32(col), u32(row))];
+    let w = i32(uniforms.width);
+    let h = i32(uniforms.height);
+
+    var c = col;
+    var r = row;
+
+    // single-step wrap (neighbors only differ by ±1)
+    if (c < 0) { c = c + w; }
+    if (c >= w) { c = c - w; }
+    if (r < 0) { r = r + h; }
+    if (r >= h) { r = r - h; }
+
+    return current_state[get_index(u32(c), u32(r))];
 }
 
 // count live neighbors (Moore neighborhood)
