@@ -67,7 +67,7 @@ fn mask_k() -> u32 {
 
 fn hash3(x: u32, y: u32, t: u32) -> u32 {
   // simple 3-input mix for debug mode
-  var h = x * 374761393u ^ y * 668265263u ^ t * 2246822519u;
+  var h = (x * 374761393u) ^ (y * 668265263u) ^ (t * 2246822519u);
   h ^= (h >> 13u); h *= 1274126177u; h ^= (h >> 16u);
   return h;
 }

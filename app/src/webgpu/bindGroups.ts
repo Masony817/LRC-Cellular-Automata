@@ -31,6 +31,7 @@ export function createBindGroups(
     } = buffers;
 
     const bgMsg1 = device.createBindGroup({
+        label: 'bgMsg1',
         layout: pipelines.msgStage1Pipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: messagingUniformBuffer } },
@@ -43,6 +44,7 @@ export function createBindGroups(
     });
 
     const bgMsg2 = device.createBindGroup({
+        label: 'bgMsg2',
         layout: pipelines.msgStage2Pipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: messagingUniformBuffer } },
@@ -54,6 +56,7 @@ export function createBindGroups(
     });
 
     const bgMsg3a = device.createBindGroup({
+        label: 'bgMsg3a',
         layout: pipelines.msgStage3aPipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: messagingUniformBuffer } },
@@ -65,6 +68,7 @@ export function createBindGroups(
     });
 
     const bgMsg3b = device.createBindGroup({
+        label: 'bgMsg3b',
         layout: pipelines.msgStage3bPipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: messagingUniformBuffer } },
@@ -74,6 +78,7 @@ export function createBindGroups(
     });
 
     const bgMoveClear = device.createBindGroup({
+        label: 'bgMoveClear',
         layout: pipelines.moveClearPipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: movementUniformBuffer } },
@@ -82,19 +87,19 @@ export function createBindGroups(
     });
 
     const bgMovePropose = device.createBindGroup({
+        label: 'bgMovePropose',
         layout: pipelines.moveProposePipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: movementUniformBuffer } },
             { binding: 1, resource: { buffer: aliveInBuffer } },
             { binding: 3, resource: { buffer: energySrcBuffer } },
-            { binding: 4, resource: { buffer: inbox1Buffer } },
-            { binding: 5, resource: { buffer: energyScentBuffer } },
             { binding: 7, resource: { buffer: intentHashBuffer } },
             { binding: 8, resource: { buffer: ppoActionsBuffer } },
         ],
     });
 
     const bgMoveApply = device.createBindGroup({
+        label: 'bgMoveApply',
         layout: pipelines.moveApplyPipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: movementUniformBuffer } },
@@ -108,6 +113,7 @@ export function createBindGroups(
     });
 
     const bgEnergyDiffuse = device.createBindGroup({
+        label: 'bgEnergyDiffuse',
         layout: pipelines.energyDiffusePipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: energyUniformBuffer } },
@@ -118,6 +124,7 @@ export function createBindGroups(
     });
 
     const bgEnergyPost = device.createBindGroup({
+        label: 'bgEnergyPost',
         layout: pipelines.energyPostPipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: energyUniformBuffer } },
@@ -131,6 +138,7 @@ export function createBindGroups(
     });
 
     const bgLife = device.createBindGroup({
+        label: 'bgLife',
         layout: pipelines.lifePipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: aliveMidBuffer } },
