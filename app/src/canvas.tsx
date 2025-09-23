@@ -20,6 +20,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     const [isInitialized, setIsInitialized] = useState(false);
     const [uiVisible, setUiVisible] = useState(true);
     const [mode, setMode] = useState<'LCR' | 'Conway'>('LCR');
+    const [aliveCount, setAliveCount] = useState<number>(0);
+
 
     // drawing
     const [isDragging, setIsDragging] = useState(false);
@@ -126,6 +128,14 @@ export const Canvas: React.FC<CanvasProps> = ({
             if(!game) return;
             const gridData = await game.getGridData();
             gridDataRef.current = gridData;
+
+            // compute alive count
+            let count = 0;
+            for (let i = 0; i < gridData.length; i++){
+                count += gridData[i];
+            }
+            setAliveCount(count);
+
             // fetched and cached one frame of grid data
             requestDraw();
         };
@@ -234,15 +244,21 @@ export const Canvas: React.FC<CanvasProps> = ({
                 // update CPU cache immediately for responsiveness
                 const data = gridDataRef.current;
                 if (data){
+                    let delta = 0;
                     for (let r = 0; r < cells.length; r++){
                         for (let c = 0; c < cells[r].length; c++){
                             if (cells[r][c] === 1){
                                 const col = wrap(pos.col + c, gridWidth);
                                 const row = wrap(pos.row + r, gridHeight);
-                                data[row * gridWidth + col] = 1;
+                                const idx = row * gridWidth + col;
+                                if (data[idx] === 0){
+                                  data[idx] = 1;
+                                  delta++;
+                                }
                             }
                         }
                     }
+                    if (delta !== 0) setAliveCount(v => v + delta);
                     requestDraw();
                     console.log('Pattern applied to CPU cache', { pattern: selectedPattern, at: pos });
                 }
@@ -260,7 +276,13 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (data){
             const col = wrap(pos.col, gridWidth);
             const row = wrap(pos.row, gridHeight);
-            data[row * gridWidth + col] = desired;
+            const idx = row * gridWidth + col;
+            const old = data[idx];
+            const next = drawingStateRef.current;
+            if (old !== next){
+              data[idx] = next;
+              setAliveCount(v => v + (next === 1 ? 1 : -1));
+            }
             requestDraw();
         }
         setIsDragging(true);
@@ -411,6 +433,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               <span>Status: {stats.isRunning ? 'Running' : 'Paused'}</span>
               <span>Speed: {stats.speed}ms</span>
               <span>Mode: {mode}</span>
+              <span>Alive: {aliveCount}</span>
               {selectedPattern && <span>Pattern: {PATTERNS[selectedPattern].name}</span>}
             </div>
           )}
