@@ -28,6 +28,19 @@ export class WebGPUManager {
             console.log('WebGPU adapter acquired');
 
             this.device = await this.adapter.requestDevice();
+            // minimal error hooks
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (this.device as any).addEventListener?.('uncapturederror', (event: any) => {
+                    const err = (event && 'error' in event) ? (event as any).error : event;
+                    console.error('WebGPU uncaptured error', err);
+                });
+                this.device.lost.then((info) => {
+                    console.error('WebGPU device lost', { reason: info.reason, message: info.message });
+                });
+            } catch (_) {
+                // noop: best-effort hooks only
+            }
             console.log('WebGPU device acquired');
             return true;
         } catch (error){

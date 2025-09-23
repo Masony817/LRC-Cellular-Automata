@@ -15,6 +15,8 @@ export interface BindGroups {
     bgLife: GPUBindGroup;
 }
 
+let __loggedBindGroupsOnce = false;
+
 export function createBindGroups(
     device: GPUDevice,
     pipelines: Pipelines,
@@ -146,6 +148,17 @@ export function createBindGroups(
             { binding: 2, resource: { buffer: lifeUniformBuffer } },
         ],
     });
+
+    if (!__loggedBindGroupsOnce) {
+        console.log('Bind groups created', {
+            groups: [
+                'bgMsg1','bgMsg2','bgMsg3a','bgMsg3b',
+                'bgMoveClear','bgMovePropose','bgMoveApply',
+                'bgEnergyDiffuse','bgEnergyPost','bgLife',
+            ]
+        });
+        __loggedBindGroupsOnce = true;
+    }
 
     return {
         bgMsg1,

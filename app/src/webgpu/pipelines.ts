@@ -65,6 +65,15 @@ export function createPipelines(device: GPUDevice): Pipelines {
         compute: { module: lifeModule, entryPoint: 'main' }
     });
 
+    console.log('Pipelines created', {
+        labels: [
+            'msg-stage1','msg-stage2','msg-stage3a','msg-stage3b',
+            'move-clear','move-propose','move-apply',
+            'energy-diffuse','energy-post-life',
+            'life-step',
+        ]
+    });
+
     return {
         msgStage1Pipeline,
         msgStage2Pipeline,

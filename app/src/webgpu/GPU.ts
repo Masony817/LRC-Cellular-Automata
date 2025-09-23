@@ -42,6 +42,9 @@ export class GPU {
     private energy_diff_milli: number = 300;
     private energy_decay_milli: number = 20;
 
+    // mode: 'LCR' (full multi-pass) or 'Conway' (classic Life only)
+    private mode: 'LCR' | 'Conway' = 'LCR';
+
     private onUpdate: (stats: Stats) => void;
 
     constructor(
@@ -54,6 +57,15 @@ export class GPU {
         this.width = width;
         this.height = height;
         this.onUpdate = onUpdate || (() => {});
+    }
+
+    setMode(mode: 'LCR' | 'Conway'): void {
+        if (this.mode !== mode){
+            this.mode = mode;
+            console.log('Mode set', { mode });
+            // no reset; next tick adapts automatically
+            this.notifyUpdate();
+        }
     }
 
     async init(): Promise<void> {
@@ -86,7 +98,7 @@ export class GPU {
         if (data.length !== this.width * this.height){
             throw new Error(`Data length mismatch for grid size ${this.width}x${this.height}`);
         }
-        this.device.queue.writeBuffer(this.buffers.aliveInBuffer, 0, data);
+        this.device.queue.writeBuffer(this.buffers.aliveInBuffer, 0, data.buffer as ArrayBuffer);
     }
 
     async getGridData(): Promise<Uint32Array> {
@@ -189,67 +201,129 @@ export class GPU {
 
     // simulation step
     async step(): Promise<void> {
-        this.updateUniforms();
+        try {
+            this.updateUniforms();
 
-        const commandEncoder = this.device.createCommandEncoder();
-        const pass = commandEncoder.beginComputePass();
+            // begin validation error scope (best-effort; optional in some impls)
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (this.device as any).pushErrorScope?.('validation');
+            } catch (_) { /* noop */ }
 
-        const workgroupsX = Math.ceil(this.width / 16);
-        const workgroupsY = Math.ceil(this.height / 16);
+            const commandEncoder = this.device.createCommandEncoder();
+            const workgroupsX = Math.ceil(this.width / 16);
+            const workgroupsY = Math.ceil(this.height / 16);
 
-        pass.setPipeline(this.pipelines.msgStage1Pipeline);
-        pass.setBindGroup(0, this.bindGroups.bgMsg1);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+            if (this.mode === 'LCR'){
+                const pass = commandEncoder.beginComputePass();
 
-        pass.setPipeline(this.pipelines.msgStage2Pipeline);
-        pass.setBindGroup(0, this.bindGroups.bgMsg2);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch msg-stage1', { gen: this.generation });
+                pass.setPipeline(this.pipelines.msgStage1Pipeline);
+                pass.setBindGroup(0, this.bindGroups.bgMsg1);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.msgStage3aPipeline);
-        pass.setBindGroup(0, this.bindGroups.bgMsg3a);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch msg-stage2', { gen: this.generation });
+                pass.setPipeline(this.pipelines.msgStage2Pipeline);
+                pass.setBindGroup(0, this.bindGroups.bgMsg2);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.msgStage3bPipeline);
-        pass.setBindGroup(0, this.bindGroups.bgMsg3b);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch msg-stage3a', { gen: this.generation });
+                pass.setPipeline(this.pipelines.msgStage3aPipeline);
+                pass.setBindGroup(0, this.bindGroups.bgMsg3a);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.moveClearPipeline);
-        pass.setBindGroup(0, this.bindGroups.bgMoveClear);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch msg-stage3b', { gen: this.generation });
+                pass.setPipeline(this.pipelines.msgStage3bPipeline);
+                pass.setBindGroup(0, this.bindGroups.bgMsg3b);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.moveProposePipeline);
-        pass.setBindGroup(0, this.bindGroups.bgMovePropose);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch move-clear', { gen: this.generation });
+                pass.setPipeline(this.pipelines.moveClearPipeline);
+                pass.setBindGroup(0, this.bindGroups.bgMoveClear);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.moveApplyPipeline);
-        pass.setBindGroup(0, this.bindGroups.bgMoveApply);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch move-propose', { gen: this.generation });
+                pass.setPipeline(this.pipelines.moveProposePipeline);
+                pass.setBindGroup(0, this.bindGroups.bgMovePropose);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.energyDiffusePipeline);
-        pass.setBindGroup(0, this.bindGroups.bgEnergyDiffuse);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch move-apply', { gen: this.generation });
+                pass.setPipeline(this.pipelines.moveApplyPipeline);
+                pass.setBindGroup(0, this.bindGroups.bgMoveApply);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.lifePipeline);
-        pass.setBindGroup(0, this.bindGroups.bgLife);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch energy-diffuse', { gen: this.generation });
+                pass.setPipeline(this.pipelines.energyDiffusePipeline);
+                pass.setBindGroup(0, this.bindGroups.bgEnergyDiffuse);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.setPipeline(this.pipelines.energyPostPipeline);
-        pass.setBindGroup(0, this.bindGroups.bgEnergyPost);
-        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                console.log('dispatch life-step', { gen: this.generation });
+                pass.setPipeline(this.pipelines.lifePipeline);
+                pass.setBindGroup(0, this.bindGroups.bgLife);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        pass.end();
-        this.device.queue.submit([commandEncoder.finish()]);
+                console.log('dispatch energy-post-life', { gen: this.generation });
+                pass.setPipeline(this.pipelines.energyPostPipeline);
+                pass.setBindGroup(0, this.bindGroups.bgEnergyPost);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
 
-        // swaps for next tick
-        [this.buffers.aliveInBuffer, this.buffers.aliveNextBuffer] = [this.buffers.aliveNextBuffer, this.buffers.aliveInBuffer];
-        [this.buffers.energySrcBuffer, this.buffers.energyDstBuffer] = [this.buffers.energyDstBuffer, this.buffers.energySrcBuffer];
-        [this.buffers.ageInBuffer, this.buffers.ageOutBuffer] = [this.buffers.ageOutBuffer, this.buffers.ageInBuffer];
+                pass.end();
+                this.device.queue.submit([commandEncoder.finish()]);
+            } else {
+                // Conway mode: copy aliveIn -> aliveMid, then run Life only
+                const copyBytes = this.width * this.height * 4;
+                commandEncoder.copyBufferToBuffer(
+                    this.buffers.aliveInBuffer, 0,
+                    this.buffers.aliveMidBuffer, 0,
+                    copyBytes
+                );
 
-        // re-bind with swapped buffers
-        this.bindGroups = createBindGroups(this.device, this.pipelines, this.buffers);
+                const pass = commandEncoder.beginComputePass();
+                console.log('dispatch life-step (Conway)', { gen: this.generation });
+                pass.setPipeline(this.pipelines.lifePipeline);
+                pass.setBindGroup(0, this.bindGroups.bgLife);
+                pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+                pass.end();
+                this.device.queue.submit([commandEncoder.finish()]);
+            }
 
-        this.generation++;
-        this.notifyUpdate();
+            try {
+                // wait for GPU work to complete
+                if (this.device.queue.onSubmittedWorkDone) {
+                    await this.device.queue.onSubmittedWorkDone();
+                }
+            } catch (e) {
+                console.error('Queue completion error', e);
+            }
+
+            // resolve validation scope if present
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const err = (this.device as any).popErrorScope ? await (this.device as any).popErrorScope() : null;
+                if (err) {
+                    console.error('Validation error during step', err);
+                } else {
+                    console.log('step ok', { gen: this.generation });
+                }
+            } catch (_) {
+                // ignore scope pop issues
+            }
+
+            // swaps for next tick
+            [this.buffers.aliveInBuffer, this.buffers.aliveNextBuffer] = [this.buffers.aliveNextBuffer, this.buffers.aliveInBuffer];
+            if (this.mode === 'LCR'){
+                [this.buffers.energySrcBuffer, this.buffers.energyDstBuffer] = [this.buffers.energyDstBuffer, this.buffers.energySrcBuffer];
+                [this.buffers.ageInBuffer, this.buffers.ageOutBuffer] = [this.buffers.ageOutBuffer, this.buffers.ageInBuffer];
+            }
+
+            // re-bind with swapped buffers
+            this.bindGroups = createBindGroups(this.device, this.pipelines, this.buffers);
+
+            this.generation++;
+            this.notifyUpdate();
+        } catch (err) {
+            console.error('step failed', err);
+        }
     }
 
     // animation loop

@@ -19,6 +19,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     const [stats, setStats] = useState<Stats | null>(null);
     const [isInitialized, setIsInitialized] = useState(false);
     const [uiVisible, setUiVisible] = useState(true);
+    const [mode, setMode] = useState<'LCR' | 'Conway'>('LCR');
 
     // drawing
     const [isDragging, setIsDragging] = useState(false);
@@ -343,17 +344,33 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     return (
         <div className="flex flex-col items-center space-y-4 relative w-full">
-          <canvas
-            ref={canvasRef}
-            width={width}
-            height={height}
-            onClick={handleCanvasClick}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            className="border border-gray-300 cursor-crosshair"
-            style={{ imageRendering: 'pixelated' }}
-          />
+          <div className="relative inline-block">
+            <canvas
+              ref={canvasRef}
+              width={width}
+              height={height}
+              onClick={handleCanvasClick}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              className="border border-gray-300 cursor-crosshair"
+              style={{ imageRendering: 'pixelated' }}
+            />
+
+            {isInitialized && uiVisible && (
+              <button
+                onClick={() => {
+                  const next = mode === 'LCR' ? 'Conway' : 'LCR';
+                  setMode(next);
+                  gameRef.current?.setMode(next);
+                }}
+                className="absolute top-2 left-2 z-50 px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 shadow"
+                title="Toggle between LCR Mode and Conway"
+              >
+                {mode === 'LCR' ? 'LCR Mode' : 'Conway Mode'}
+              </button>
+            )}
+          </div>
 
           {dropdownVisible && (
             <div
@@ -393,6 +410,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               <span>Generation: {stats.generation}</span>
               <span>Status: {stats.isRunning ? 'Running' : 'Paused'}</span>
               <span>Speed: {stats.speed}ms</span>
+              <span>Mode: {mode}</span>
               {selectedPattern && <span>Pattern: {PATTERNS[selectedPattern].name}</span>}
             </div>
           )}
