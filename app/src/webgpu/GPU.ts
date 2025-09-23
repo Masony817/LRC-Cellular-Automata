@@ -105,20 +105,28 @@ export class GPU {
         if (this.gridReadInFlight) return this.gridReadInFlight;
 
         const run = async () => {
+            // Capture current dimensions and buffers to avoid races if resize occurs during await
+            const widthSnapshot = this.width;
+            const heightSnapshot = this.height;
+            const aliveInBuffer = this.buffers.aliveInBuffer;
+            const gridReadBuffer = this.buffers.gridReadBuffer;
+
+            const copyBytes = widthSnapshot * heightSnapshot * 4;
             const commandEncoder = this.device.createCommandEncoder();
             commandEncoder.copyBufferToBuffer(
-                this.buffers.aliveInBuffer, 0,
-                this.buffers.gridReadBuffer, 0,
-                this.width * this.height * 4
+                aliveInBuffer, 0,
+                gridReadBuffer, 0,
+                copyBytes
             );
             this.device.queue.submit([commandEncoder.finish()]);
 
-            if (this.buffers.gridReadBuffer.mapState === 'mapped'){
-                this.buffers.gridReadBuffer.unmap();
+            if (gridReadBuffer.mapState === 'mapped'){
+                gridReadBuffer.unmap();
             }
-            await this.buffers.gridReadBuffer.mapAsync(GPUMapMode.READ);
-            const data = new Uint32Array(this.buffers.gridReadBuffer.getMappedRange().slice(0));
-            this.buffers.gridReadBuffer.unmap();
+            await gridReadBuffer.mapAsync(GPUMapMode.READ, 0, copyBytes);
+            const mapped = gridReadBuffer.getMappedRange(0, copyBytes);
+            const data = new Uint32Array(mapped.slice(0));
+            gridReadBuffer.unmap();
             return data;
         };
 
@@ -140,18 +148,31 @@ export class GPU {
     }
 
     async getCell(col: number, row: number): Promise<number> {
-        const offset = this.cellOffset(col, row);
+        // Capture dimensions and buffers to avoid races across await when resizing
+        const widthSnapshot = this.width;
+        const heightSnapshot = this.height;
+        const aliveInBuffer = this.buffers.aliveInBuffer;
+        const singleCellReadBuffer = this.buffers.singleCellReadBuffer;
+
+        const wrapCoordinate = (n: number, max: number) => {
+            const r = n % max;
+            return r < 0 ? r + max : r;
+        };
+        const wrappedCol = wrapCoordinate(col, widthSnapshot);
+        const wrappedRow = wrapCoordinate(row, heightSnapshot);
+        const offset = (wrappedRow * widthSnapshot + wrappedCol) * 4;
+
         const encoder = this.device.createCommandEncoder();
-        encoder.copyBufferToBuffer(this.buffers.aliveInBuffer, offset, this.buffers.singleCellReadBuffer, 0, 4);
+        encoder.copyBufferToBuffer(aliveInBuffer, offset, singleCellReadBuffer, 0, 4);
         this.device.queue.submit([encoder.finish()]);
 
-        if (this.buffers.singleCellReadBuffer.mapState === 'mapped'){
-            this.buffers.singleCellReadBuffer.unmap();
+        if (singleCellReadBuffer.mapState === 'mapped'){
+            singleCellReadBuffer.unmap();
         }
-        await this.buffers.singleCellReadBuffer.mapAsync(GPUMapMode.READ);
-        const view = new Uint32Array(this.buffers.singleCellReadBuffer.getMappedRange());
+        await singleCellReadBuffer.mapAsync(GPUMapMode.READ, 0, 4);
+        const view = new Uint32Array(singleCellReadBuffer.getMappedRange(0, 4));
         const value = view[0];
-        this.buffers.singleCellReadBuffer.unmap();
+        singleCellReadBuffer.unmap();
         return value;
     }
 

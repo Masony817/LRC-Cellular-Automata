@@ -1,26 +1,38 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useImperativeHandle } from 'react';
 import { WebGPUManager } from './WebGPUManager';
 import { GPU, type Stats } from './gpu';
-import { PATTERNS, type PatternName, getPatternCells, setPatterns } from './patterns';
+import { type PatternName, getPatternCells, setPatterns } from './patterns';
 
 interface CanvasProps{
     width?: number;
     height?: number;
     cellSize?: number;
+    mode? : 'LCR' | 'Conway';
+    onStatsUpdate? : (stats: Stats) => void;
 }
 
-export const Canvas: React.FC<CanvasProps> = ({
+export type CanvasHandler = {
+  start: () => void;
+  stop: () => void;
+  toggle: () => void;
+  reset: () => void;
+  randomize: (density?: number) => void;
+  setSpeed: (ms: number) => void;
+  setMode: (mode: 'LCR' | 'Conway') => void;
+  getStats: () => Stats | null;
+}
+
+export const Canvas = React.forwardRef<CanvasHandler, CanvasProps>(({
      width = 800, 
      height = 600, 
-     cellSize = 4
-}) => {
+     cellSize = 4,
+     mode = 'Conway',
+     onStatsUpdate = () => {}
+}, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const gameRef = useRef<GPU | null>(null);
     const [stats, setStats] = useState<Stats | null>(null);
-    const [isInitialized, setIsInitialized] = useState(false);
-    const [uiVisible, setUiVisible] = useState(true);
-    const [mode, setMode] = useState<'LCR' | 'Conway'>('LCR');
-    const [aliveCount, setAliveCount] = useState<number>(0);
+    // removed in-canvas UI; keep component headless and controlled from parent
 
 
     // drawing
@@ -28,10 +40,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     const drawingStateRef = useRef<0 | 1>(1);
     const [mousePos, setMousePos] = useState<{col: number; row: number} | null>(null);
 
-    // pattern 
+    // pattern (to be migrated into sidebar controls)
     const [selectedPattern, setSelectedPattern] = useState<PatternName | null>(null);
-    const [dropdownVisible, setDropdownVisible] = useState(false);
-    const [dropdownPos, setDropdownPos] = useState<{x: number; y: number}>({ x: 0, y: 0 });
 
     const gridWidth = Math.floor(width / cellSize);
     const gridHeight = Math.floor(height / cellSize);
@@ -117,6 +127,22 @@ export const Canvas: React.FC<CanvasProps> = ({
             drawFromCache();
         });
     }, [drawFromCache]);
+    const requestDrawRef = useRef<() => void>(() => {});
+    useEffect(() => {
+        requestDrawRef.current = requestDraw;
+    }, [requestDraw]);
+
+
+    useImperativeHandle(ref, () => ({
+      start: () => gameRef.current?.start(),
+      stop: () => gameRef.current?.stop(),
+      toggle: () => { stats?.isRunning ? gameRef.current?.stop() : gameRef.current?.start() },
+      reset: () => gameRef.current?.reset(),
+      randomize: (density?: number) => gameRef.current?.randomize(density),
+      setSpeed: (ms: number) => gameRef.current?.setSpeed(ms),
+      setMode: (mode) => gameRef.current?.setMode(mode),
+      getStats: () => stats,
+    }), [stats]);
 
     const scheduleFetch = useCallback((generation: number)=>{
         pendingGenRef.current = generation;
@@ -129,12 +155,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             const gridData = await game.getGridData();
             gridDataRef.current = gridData;
 
-            // compute alive count
-            let count = 0;
-            for (let i = 0; i < gridData.length; i++){
-                count += gridData[i];
-            }
-            setAliveCount(count);
+            // compute alive count (to be surfaced later in sidebar)
 
             // fetched and cached one frame of grid data
             requestDraw();
@@ -151,7 +172,8 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     const handleStatsUpdate = useCallback((newStats: Stats) =>{
         setStats(newStats);
-    }, [])
+        onStatsUpdate?.(newStats);
+    }, [onStatsUpdate]);
 
     useEffect(() => {
         if(stats){
@@ -194,7 +216,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             console.log('Random pattern initialized');
 
             gameRef.current = game;
-            setIsInitialized(true);
             console.log('Canvas initialized successfully');
         };
 
@@ -222,6 +243,20 @@ export const Canvas: React.FC<CanvasProps> = ({
         }
     }, [gridWidth, gridHeight, handleStatsUpdate]);
 
+    // controlled mode by parent component
+    useEffect(()=>{
+      gameRef.current?.setMode(mode);
+    }, [mode]);
+
+    // resize GPU when grid dims change due to width/height/cellSize
+    useEffect(() => {
+        if (!gameRef.current) return;
+        gameRef.current.resize(gridWidth, gridHeight);
+        // invalidate CPU cache and redraw
+        gridDataRef.current = null;
+        requestDrawRef.current();
+    }, [gridWidth, gridHeight]);
+    
     const localCoordsToCell = (event: React.MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current;
         if (!canvas) return null;
@@ -258,7 +293,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                             }
                         }
                     }
-                    if (delta !== 0) setAliveCount(v => v + delta);
+                    // alive count state removed; will be reintroduced via sidebar later
                     requestDraw();
                     console.log('Pattern applied to CPU cache', { pattern: selectedPattern, at: pos });
                 }
@@ -281,7 +316,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             const next = drawingStateRef.current;
             if (old !== next){
               data[idx] = next;
-              setAliveCount(v => v + (next === 1 ? 1 : -1));
+              // alive count state removed; will be reintroduced via sidebar later
             }
             requestDraw();
         }
@@ -312,12 +347,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         // placeholder to keep onClick, actual actions handled on mouse down/up
     }, []);
 
-    // Keyboard shortcuts and dropdown handling
+    // Keyboard shortcuts
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             if (!gameRef.current) return;
             const code = e.code;
-            if ([ 'Space', 'KeyR', 'Escape', 'KeyI' ].includes(code) || (code === 'KeyC' && e.ctrlKey)){
+            if ([ 'Space', 'KeyR', 'Escape' ].includes(code) || (code === 'KeyC' && e.ctrlKey)){
                 e.preventDefault();
             }
             switch (code){
@@ -333,10 +368,6 @@ export const Canvas: React.FC<CanvasProps> = ({
                     break;
                 case 'Escape':
                     setSelectedPattern(null);
-                    setDropdownVisible(false);
-                    break;
-                case 'KeyI':
-                    setUiVisible(v => !v);
                     break;
                 default:
                     if (code === 'KeyC' && e.ctrlKey){
@@ -345,22 +376,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                     break;
             }
         };
-
-        const onDocumentClick = (e: MouseEvent) => {
-            if (e.shiftKey){
-                e.preventDefault();
-                setDropdownVisible(true);
-                setDropdownPos({ x: e.clientX, y: e.clientY });
-            } else {
-                setDropdownVisible(false);
-            }
-        };
-
         document.addEventListener('keydown', onKeyDown);
-        document.addEventListener('click', onDocumentClick);
         return () => {
             document.removeEventListener('keydown', onKeyDown);
-            document.removeEventListener('click', onDocumentClick);
         };
     }, [stats]);
 
@@ -378,106 +396,8 @@ export const Canvas: React.FC<CanvasProps> = ({
               className="border border-gray-300 cursor-crosshair"
               style={{ imageRendering: 'pixelated' }}
             />
-
-            {isInitialized && uiVisible && (
-              <button
-                onClick={() => {
-                  const next = mode === 'LCR' ? 'Conway' : 'LCR';
-                  setMode(next);
-                  gameRef.current?.setMode(next);
-                }}
-                className="absolute top-2 left-2 z-50 px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 shadow"
-                title="Toggle between LCR Mode and Conway"
-              >
-                {mode === 'LCR' ? 'LCR Mode' : 'Conway Mode'}
-              </button>
-            )}
           </div>
-
-          {dropdownVisible && (
-            <div
-              className="absolute z-50 bg-black border border-white rounded p-2 max-h-72 overflow-y-auto min-w-[220px]"
-              style={{ left: dropdownPos.x, top: dropdownPos.y }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div
-                className="p-2 hover:bg-gray-700 cursor-pointer"
-                onClick={() => { setSelectedPattern(null); setDropdownVisible(false); }}
-              >
-                <div className="font-bold">None</div>
-                <div className="text-xs text-gray-300">Draw Mode</div>
-              </div>
-              {Object.keys(PATTERNS).map((key) => {
-                const k = key as PatternName;
-                const p = PATTERNS[k];
-                return (
-                  <div
-                    key={key}
-                    className="p-2 hover:bg-gray-700 cursor-pointer flex items-center justify-between"
-                    onClick={() => { setSelectedPattern(k); setDropdownVisible(false); }}
-                  >
-                    <div>
-                      <div className="font-bold">{p.name}</div>
-                      <div className="text-xs text-gray-300">{p.description}</div>
-                    </div>
-                    <div className="ml-2 text-xs text-gray-400">{p.cells.length}x{Math.max(...p.cells.map(r => r.length))}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {stats && (
-            <div className="flex space-x-4 text-sm text-gray-300">
-              <span>Generation: {stats.generation}</span>
-              <span>Status: {stats.isRunning ? 'Running' : 'Paused'}</span>
-              <span>Speed: {stats.speed}ms</span>
-              <span>Mode: {mode}</span>
-              <span>Alive: {aliveCount}</span>
-              {selectedPattern && <span>Pattern: {PATTERNS[selectedPattern].name}</span>}
-            </div>
-          )}
-
-          {isInitialized && uiVisible && (
-            <div className="flex flex-wrap gap-2 items-center justify-center">
-              <button
-                onClick={() => gameRef.current?.start()}
-                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-              >
-                Start
-              </button>
-              <button
-                onClick={() => gameRef.current?.stop()}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-              >
-                Stop
-              </button>
-              <button
-                onClick={() => gameRef.current?.reset()}
-                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
-              >
-                Clear
-              </button>
-              <button
-                onClick={() => gameRef.current?.randomize(0.3)}
-                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-              >
-                Random Fill
-              </button>
-              <div className="flex items-center gap-2 text-sm text-gray-300 ml-4">
-                <label>Speed</label>
-                <input
-                  type="range"
-                  min={50}
-                  max={1000}
-                  step={50}
-                  defaultValue={stats?.speed ?? 200}
-                  onChange={(e) => gameRef.current?.setSpeed(parseInt(e.target.value))}
-                  className="w-40"
-                />
-              </div>
-            </div>
-          )}
         </div>
       );
-};
+});
+Canvas.displayName = 'Canvas';
